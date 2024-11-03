@@ -1,0 +1,11 @@
+[package]
+name = "clatter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde_json = "*"
+serde_derive = "*"
+serde = { version = "1.0.214", features = ["derive"] }
+regex = "1"
+chrono = "0.4"
