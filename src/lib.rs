@@ -1,7 +1,64 @@
-use chrono::NaiveDateTime;
+use std::sync::LazyLock;
+
+use chrono::{NaiveDateTime, Timelike};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+pub fn parse(string: String) -> Vec<Tick> {
+    let mut arrive = vec![];
+    let mut profit_summary = 0.0;
+    let mut last_minute = 0;
+
+    let mut tick = vec![];
+    for line in string.lines() {
+        let line = remove_ansi_escape_codes(line);
+        let event = LogEvent::parse(line.as_str());
+        match event {
+            LogEvent::Price => {
+                let price_event = PriceEvent::parse(line.as_str()).unwrap();
+                let minute = price_event.time.minute();
+                if minute != last_minute {
+                    tick.push(Tick {
+                        time: price_event.time,
+                        mid_price: price_event.mid,
+                        profit: profit_summary,
+                    });
+                    last_minute = minute;
+                }
+            }
+            LogEvent::Order => {
+                let order_event = OrderEvent::parse(line.as_str()).unwrap();
+                let price = match order_event.direction {
+                    OrderDirection::Short => order_event.price,
+                    OrderDirection::Long => -order_event.price,
+                };
+                let volume = match order_event.action {
+                    Action::Open => (order_event.volume * 1000.0) as i64,
+                    Action::Close => (-order_event.volume * 1000.0) as i64,
+                };
+                arrive.push((price, volume));
+                let volume_add = arrive.iter().map(|(_, volume)| *volume).sum::<i64>();
+                if (arrive.len() > 0) & volume_add.eq(&0) {
+                    let profit = arrive
+                        .iter()
+                        .map(|(price, volume)| price * volume.abs() as f64 / 1000.0)
+                        .sum::<f64>();
+                    profit_summary += (profit * 10000.0).round() / 10000.0;
+                    arrive.clear();
+                }
+            }
+            _ => {}
+        }
+    }
+    tick
+}
+
+#[derive(Debug)]
+pub struct Tick {
+    pub time: NaiveDateTime,
+    pub mid_price: f64,
+    pub profit: f64,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub enum LogEvent {
@@ -54,7 +111,7 @@ impl LogEvent {
 
 #[derive(Debug)]
 pub struct PriceEvent {
-    pub time: i64,
+    pub time: NaiveDateTime,
     pub mid: f64,
     pub open: (f64, i64),
     pub std: f64,
@@ -62,26 +119,18 @@ pub struct PriceEvent {
     pub profit: f64,
 }
 
+static R: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap());
+
 pub fn remove_ansi_escape_codes(text: &str) -> String {
-    let ansi_escape = Regex::new(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
-    ansi_escape.replace_all(text, "").to_string()
+    R.replace_all(text, "").to_string()
 }
-
-pub fn into_timestamp(str: &str) -> i64 {
-    // todo: NaiveDateTime的timestamp_millis方法未来会被移除
-    let date_time = NaiveDateTime::parse_from_str(str, "%Y-%m-%dT%H:%M:%S%.f").unwrap();
-    // 转换为时间戳（以毫秒为单位）
-    let timestamp_millis = date_time.and_utc().timestamp_millis();
-
-    timestamp_millis
-}
-
 
 impl PriceEvent {
     pub fn parse(str: &str) -> Option<Self> {
         let mut params = str.split(' ');
-        let time = params.next().unwrap().to_string(); // 这里应该转换为时间戳
-        let timestamp = into_timestamp(time.as_str());
+        let time = params.next().unwrap();
+        let time = NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M:%S%.f").unwrap();
         params.next().unwrap();
         params.next().unwrap();
         params.next().unwrap();
@@ -136,7 +185,7 @@ impl PriceEvent {
             .unwrap();
 
         Some(Self {
-            time: timestamp,
+            time,
             mid,
             open,
             std,
@@ -146,10 +195,9 @@ impl PriceEvent {
     }
 }
 
-
 #[derive(Debug)]
 pub struct OrderEvent {
-    pub time: i64,
+    pub time: NaiveDateTime,
     pub price: f64,
     pub volume: f64,
     pub direction: OrderDirection,
@@ -160,8 +208,8 @@ impl OrderEvent {
     pub fn parse(str: &str) -> Option<OrderEvent> {
         // println!("{}", str);
         let mut params = str.split(' ');
-        let time = params.next().unwrap().to_string(); // 这里应该转换为时间戳
-        let timestamp = into_timestamp(time.as_str());
+        let time = params.next().unwrap();
+        let time = NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M:%S%.f").unwrap();
         params.next().unwrap();
         params.next().unwrap();
         params.next().unwrap();
@@ -169,7 +217,6 @@ impl OrderEvent {
         let Some(_type) = params.next() else {
             return None;
         };
-
 
         let traded_price = params
             .next()
@@ -194,22 +241,17 @@ impl OrderEvent {
             .unwrap()
             .split(':')
             .last()
-            .unwrap().to_string();
-
-
-        let action_string = params
-            .next()
             .unwrap()
-            .split(':')
-            .last()
-            .unwrap();
+            .to_string();
+
+        let action_string = params.next().unwrap().split(':').last().unwrap();
 
         let action_string = format!("\"{action_string}\"");
         let action = serde_json::from_str(action_string.as_str()).unwrap();
         let order_direction_string = format!("\"{}\"", direction);
         let order_direction = serde_json::from_str(order_direction_string.as_str()).unwrap();
         Some(Self {
-            time: timestamp,
+            time,
             price: traded_price,
             volume,
             direction: order_direction,

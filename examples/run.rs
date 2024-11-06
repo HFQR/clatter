@@ -1,54 +1,94 @@
 use std::io::Read;
-use clatter::{PriceEvent, LogEvent, remove_ansi_escape_codes, OrderEvent, Action, OrderDirection};
 
+use plotters::prelude::*;
 
-pub fn parse_log(string: String) -> Vec<(i64, f64, f64)> {
-    let mut arrive = vec![];
-    let mut profit_summary = 0.0;
-    let mut last_minute = 0;
-    let mut tick = vec![];
-    for line in string.lines() {
-        let line = remove_ansi_escape_codes(line);
-        let event = LogEvent::parse(line.as_str());
-        match event {
-            LogEvent::Price => {
-                let price_event = PriceEvent::parse(line.as_str()).unwrap();
-                let minute = price_event.time / 1000 / 60;
-                if minute != last_minute {
-                    tick.push((price_event.time, price_event.mid, profit_summary));
-                    last_minute = minute;
-                }
-            }
-            LogEvent::Order => {
-                let order_event = OrderEvent::parse(line.as_str()).unwrap();
-                let price = match order_event.direction {
-                    OrderDirection::Short => order_event.price,
-                    OrderDirection::Long => -order_event.price
-                };
-                let volume = match order_event.action {
-                    Action::Open => (order_event.volume * 1000.0) as i64,
-                    Action::Close => (-order_event.volume * 1000.0) as i64
-                };
-                arrive.push((price, volume));
-                let volume_add = arrive.iter().map(|(_, volume)| *volume).sum::<i64>();
-                if (arrive.len() > 0) & volume_add.eq(&0) {
-                    let profit = arrive.iter().map(|(price, volume)| {
-                        price * volume.abs() as f64 / 1000.0
-                    }).sum::<f64>();
-                    profit_summary += (profit * 10000.0).round() / 10000.0;
-                    arrive.clear();
-                }
-            }
-            _ => {}
-        }
-    }
-    tick
-}
+const OUT_FILE_NAME: &str = "test.png";
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut file = std::fs::File::open("./examples/hft_hfqr.2024-11-03").unwrap();
     let mut string = String::new();
     file.read_to_string(&mut string).unwrap();
-    let tick = parse_log(string);
-    println!("{tick:?}");
+
+    let tick = clatter::parse(string);
+
+    let root = BitMapBackend::new(OUT_FILE_NAME, (1920, 1080)).into_drawing_area();
+    root.fill(&WHITE)?;
+
+    let (upper, lower) = root.split_vertically(1080 - 324);
+
+    let (to_date, from_date) = (
+        tick.last().unwrap().time.and_utc().timestamp(),
+        tick.first().unwrap().time.and_utc().timestamp(),
+    );
+
+    let min = tick
+        .iter()
+        .min_by(|a, b| a.mid_price.total_cmp(&b.mid_price))
+        .unwrap()
+        .mid_price;
+
+    let max = tick
+        .iter()
+        .max_by(|a, b| a.mid_price.total_cmp(&b.mid_price))
+        .unwrap()
+        .mid_price;
+
+    let mut chart = ChartBuilder::on(&upper)
+        .caption("Trading momentum", ("sans-serif", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 60)
+        .set_label_area_size(LabelAreaPosition::Bottom, 60)
+        .set_label_area_size(LabelAreaPosition::Right, 60)
+        .build_cartesian_2d((from_date..to_date).into_segmented(), min..max)?;
+
+    chart.configure_mesh().y_desc("Price").draw()?;
+
+    let line = LineSeries::new(
+        tick.iter().map(|tick| {
+            (
+                SegmentValue::CenterOf(tick.time.and_utc().timestamp()),
+                tick.mid_price,
+            )
+        }),
+        &BLACK,
+    );
+
+    chart.draw_series(line)?;
+
+    let min = tick
+        .iter()
+        .min_by(|a, b| a.profit.total_cmp(&b.profit))
+        .unwrap()
+        .profit;
+
+    let max = tick
+        .iter()
+        .max_by(|a, b| a.profit.total_cmp(&b.profit))
+        .unwrap()
+        .profit;
+
+    let mut chart = ChartBuilder::on(&lower)
+        .caption("Trading volume", ("sans-serif", 30))
+        .set_label_area_size(LabelAreaPosition::Left, 60)
+        .set_label_area_size(LabelAreaPosition::Bottom, 60)
+        .set_label_area_size(LabelAreaPosition::Right, 60)
+        .build_cartesian_2d((from_date..to_date).into_segmented(), min..max)?;
+
+    chart
+        .configure_mesh()
+        .disable_mesh()
+        .y_desc("Profit")
+        .draw()?;
+
+    let actual = Histogram::vertical(&chart).style(GREEN.filled()).data(
+        tick.iter()
+            .map(|tick| (tick.time.and_utc().timestamp(), tick.profit)),
+    );
+
+    chart.draw_series(actual)?;
+
+    // To avoid the IO failure being ignored silently, we manually call the present function
+    root.present().expect("Unable to write result to file, please make sure 'plotters-doc-data' dir exists under current dir");
+    println!("Result has been saved to {}", OUT_FILE_NAME);
+
+    Ok(())
 }
