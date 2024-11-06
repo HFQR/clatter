@@ -2,7 +2,6 @@ use chrono::NaiveDateTime;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-
 #[derive(Debug, Deserialize, Serialize)]
 pub enum LogEvent {
     #[serde(alias = "price")]
@@ -71,11 +70,8 @@ pub fn into_timestamp(str: &str) -> i64 {
     // todo: NaiveDateTime的timestamp_millis方法未来会被移除
     let date_time = NaiveDateTime::parse_from_str(str, "%Y-%m-%dT%H:%M:%S%.f").unwrap();
     // 转换为时间戳（以毫秒为单位）
-    let timestamp_millis = date_time.and_utc().timestamp_millis();
-
-    timestamp_millis
+    date_time.and_utc().timestamp_millis()
 }
-
 
 impl PriceEvent {
     pub fn parse(str: &str) -> Option<Self> {
@@ -85,21 +81,11 @@ impl PriceEvent {
         params.next().unwrap();
         params.next().unwrap();
         params.next().unwrap();
-
-        let Some(_type) = params.next() else {
-            return None;
-        };
-
-        let Some(mid) = params.next() else {
-            return None;
-        };
+        let _type = params.next()?;
+        let mid = params.next()?;
 
         let mut mid = mid.split(':');
-
-        if mid.next().filter(|name| *name == "mid").is_none() {
-            return None;
-        }
-
+        mid.next().filter(|name| *name == "mid")?;
         let mid = mid.next().unwrap().parse().unwrap();
 
         let mut open = params.next().unwrap().split(':').last().unwrap().split('-');
@@ -146,7 +132,6 @@ impl PriceEvent {
     }
 }
 
-
 #[derive(Debug)]
 pub struct OrderEvent {
     pub time: i64,
@@ -165,11 +150,7 @@ impl OrderEvent {
         params.next().unwrap();
         params.next().unwrap();
         params.next().unwrap();
-
-        let Some(_type) = params.next() else {
-            return None;
-        };
-
+        let _type = params.next()?;
 
         let traded_price = params
             .next()
@@ -194,15 +175,10 @@ impl OrderEvent {
             .unwrap()
             .split(':')
             .last()
-            .unwrap().to_string();
-
-
-        let action_string = params
-            .next()
             .unwrap()
-            .split(':')
-            .last()
-            .unwrap();
+            .to_string();
+
+        let action_string = params.next().unwrap().split(':').last().unwrap();
 
         let action_string = format!("\"{action_string}\"");
         let action = serde_json::from_str(action_string.as_str()).unwrap();
