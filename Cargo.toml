@@ -9,3 +9,4 @@ serde_derive = "*"
 serde = { version = "1.0.214", features = ["derive"] }
 regex = "1"
 chrono = "0.4"
+plotters = "0.3"
