@@ -157,7 +157,6 @@ pub fn plot(data: Vec<(i64, f64, f64)>) -> Result<(), Box<dyn std::error::Error>
         .border_style(&WHITE)
         .draw()?;
     root.present()?;
-
     Ok(())
 }
 
