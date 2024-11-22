@@ -23,6 +23,7 @@ pub enum Action {
 pub enum OrderDirection {
     Short,
     Long,
+    None,
 }
 
 impl LogEvent {
@@ -55,10 +56,11 @@ impl LogEvent {
 pub struct PriceEvent {
     pub time: i64,
     pub mid: f64,
-    pub open: (f64, i64),
-    pub std: f64,
+    pub open: (f64, f64),
+    pub order_direction: OrderDirection,
     pub lob: (f64, i64, f64, i64),
-    pub profit: f64,
+    pub spread: f64,
+    pub vol: f64,
 }
 
 pub fn remove_ansi_escape_codes(text: &str) -> String {
@@ -71,6 +73,13 @@ pub fn into_timestamp(str: &str) -> i64 {
     let date_time = NaiveDateTime::parse_from_str(str, "%Y-%m-%dT%H:%M:%S%.f").unwrap();
     // 转换为时间戳（以毫秒为单位）
     date_time.and_utc().timestamp_millis()
+}
+
+fn parse_range(s: &str) -> (f64, f64) {
+    let x = s.find("-").unwrap();
+    let price = s.get(0..x).unwrap();
+    let volume = s.get(x + 1..s.len()).unwrap();
+    (price.parse().unwrap(), volume.parse().unwrap())
 }
 
 impl PriceEvent {
@@ -88,23 +97,19 @@ impl PriceEvent {
         mid.next().filter(|name| *name == "mid")?;
         let mid = mid.next().unwrap().parse().unwrap();
 
-        let mut open = params.next().unwrap().split(':').last().unwrap().split('-');
-        let open = (
-            open.next().unwrap().parse().unwrap(),
-            open.next().unwrap().parse().unwrap(),
-        );
-
-        let std = params
+        let direction = params
             .next()
             .unwrap()
             .split(':')
             .last()
             .unwrap()
-            .parse()
-            .unwrap();
+            .to_string();
+
+        let open = params.next().unwrap().split(':').last().unwrap();
+        let open = parse_range(open);
+
 
         let lob1 = params.next().unwrap().split(':').last().unwrap();
-
         let lob = (
             lob1.parse().unwrap(),
             params.next().unwrap().parse().unwrap(),
@@ -112,7 +117,7 @@ impl PriceEvent {
             params.next().unwrap().parse().unwrap(),
         );
 
-        let profit = params
+        let spread = params
             .next()
             .unwrap()
             .split(':')
@@ -121,13 +126,24 @@ impl PriceEvent {
             .parse()
             .unwrap();
 
+        let order_direction_string = format!("\"{}\"", direction);
+        let order_direction = serde_json::from_str(order_direction_string.as_str()).unwrap();
+        let vol = params
+            .next()
+            .unwrap()
+            .split(':')
+            .last()
+            .unwrap()
+            .parse()
+            .unwrap();
         Some(Self {
             time: timestamp,
             mid,
             open,
-            std,
+            order_direction,
             lob,
-            profit,
+            spread,
+            vol,
         })
     }
 }

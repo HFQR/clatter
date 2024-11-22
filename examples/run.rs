@@ -30,6 +30,7 @@ pub fn parse_log(string: String) -> Vec<(i64, f64, f64)> {
                 let price = match order_event.direction {
                     OrderDirection::Short => order_event.price,
                     OrderDirection::Long => -order_event.price,
+                    _ => { unreachable!() }
                 };
                 let volume = match order_event.action {
                     Action::Open => (order_event.volume * 1000.0) as i64,
@@ -71,11 +72,11 @@ pub fn plot(data: Vec<(i64, f64, f64)>) -> Result<(), Box<dyn std::error::Error>
             (*first_price, *first_price, *first_profit, *first_profit),
         ),
         |(
-            mut pp,
-            mut price,
-            mut profit,
-            (mut max_price, mut min_price, mut max_profit, mut min_profit),
-        ),
+             mut pp,
+             mut price,
+             mut profit,
+             (mut max_price, mut min_price, mut max_profit, mut min_profit),
+         ),
          (timestamp, mid_price, signal_profit)| {
             pp += *signal_profit;
             price.push((*timestamp, *mid_price));
@@ -161,8 +162,8 @@ pub fn plot(data: Vec<(i64, f64, f64)>) -> Result<(), Box<dyn std::error::Error>
 }
 
 fn main() {
-    // let mut file = std::fs::File::open(r"E:\CryptoHFT\hf\logs\hft_hfqr.2024-11-06").unwrap();
-    let mut file = std::fs::File::open(r"./examples/hft_hfqr.2024-11-03").unwrap();
+    let mut file = std::fs::File::open(r"E:\CryptoHFT\hf\logs\hft_hfqr.2024-11-22").unwrap();
+    // let mut file = std::fs::File::open(r"./examples/hft_hfqr.2024-11-03").unwrap();
     let mut string = String::new();
     file.read_to_string(&mut string).unwrap();
     let tick = parse_log(string);
